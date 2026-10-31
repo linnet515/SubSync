@@ -211,7 +211,66 @@ def create_sub():
         return jsonify(error=str(e)), 400
     return jsonify(id=sid), 201
 
-
+@bp.put("/api/subscriptions/<int:sid>")
+@roles_required("admin", "staff")
+def edit_draft(sid):
+    """Edit a subscription while it is still a Draft. Send only the fields you want to change."""
+    db, d = get_db(), request.get_json(silent=True) or {}
+    s = q1(db, "SELECT * FROM subscriptions WHERE id=?", (sid,))
+    if not s:
+        return jsonify(error="Not found"), 404
+    if s["status"] != "draft":
+        return jsonify(error="Only Draft subscriptions can be edited"), 400
+    try:
+        plan = q1(db, "SELECT * FROM plans WHERE id=?", (d.get("plan_id") or s["plan_id"],))
+        if not plan:
+            raise ValueError("Choose a valid plan")
+        start = d.get("start_date") or s["start_date"]
+        expiry = d.get("expiry_date") or s["expiry_date"]
+        terms = d.get("payment_terms") or s["payment_terms"]
+        if plan["start_date"] and start < plan["start_date"]:
+            raise ValueError(f"This plan is only available from {plan['start_date']}")
+        if plan["end_date"] and start > plan["end_date"]:
+            raise ValueError("This plan is closed for new subscriptions")
+        if plan["end_date"] and expiry > plan["end_date"]:
+            expiry = plan["end_date"]
+        if expiry <= start:
+            raise ValueError("Expiry date must be after the start date")
+        items = d.get("lines")
+        if items is None:
+            qty = q1(db, """SELECT COALESCE(SUM(qty),0) AS n FROM subscription_lines
+                            WHERE subscription_id=? AND product_id IS NOT NULL""", (sid,))["n"]
+        else:
+            qty = sum(int(i.get("qty") or 1) for i in items)
+        if qty < plan["min_qty"]:
+            raise ValueError(f"This plan needs a minimum quantity of {plan['min_qty']}")
+        if items is not None:  # replace the product lines, keep the plan fee line
+            db.execute("DELETE FROM subscription_lines WHERE subscription_id=? AND product_id IS NOT NULL", (sid,))
+            tax = q1(db, "SELECT id FROM taxes ORDER BY id LIMIT 1")
+            default_tax = tax["id"] if tax else None
+            for i in items:
+                p = q1(db, "SELECT * FROM products WHERE id=?", (i.get("product_id"),))
+                if not p:
+                    raise ValueError("Unknown product")
+                price, label = p["sales_price"], p["name"]
+                if i.get("variant_id"):
+                    v = q1(db, "SELECT * FROM variants WHERE id=? AND product_id=?", (i["variant_id"], p["id"]))
+                    if not v:
+                        raise ValueError("That variant does not belong to the chosen product")
+                    price += v["extra_price"]
+                    label += f" - {v['value']}"
+                db.execute("""INSERT INTO subscription_lines(subscription_id,product_id,variant_id,description,qty,unit_price,tax_id)
+                              VALUES(?,?,?,?,?,?,?)""", (sid, p["id"], i.get("variant_id") or None, label,
+                                                         int(i.get("qty") or 1), price, i.get("tax_id") or default_tax))
+        db.execute("UPDATE subscription_lines SET description=?, unit_price=? WHERE subscription_id=? AND product_id IS NULL",
+                   (f"Plan: {plan['name']}", plan["price"], sid))
+        db.execute("UPDATE subscriptions SET plan_id=?, start_date=?, expiry_date=?, payment_terms=? WHERE id=?",
+                   (plan["id"], start, expiry, terms, sid))
+        db.commit()
+    except (ValueError, KeyError, sqlite3.Error) as e:
+        db.rollback()
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True)
 @bp.post("/api/subscriptions/from-template")
 @roles_required("admin", "staff")
 def sub_from_template():
