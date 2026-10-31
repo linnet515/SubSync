@@ -189,12 +189,11 @@ async function loadDash() {
   await safe(async () => {
     const d = await api(`/api/dashboard?from=${$("#d-from").value}&to=${$("#d-to").value}`);
     const max = Math.max(1, ...d.revenue_by_month.map((x) => x.amt));
-    const card = (t, v, c = "") => `<div class="card"><p class="text-slate-400 text-sm">${t}</p><p class="text-3xl font-bold mt-1 ${c}">${v}</p></div>`;
+    const card = (t, v, c = "") => `<div class="card"><p class="text-slate-400 text-sm">${t}<const card = (t, v, c = "", x = "") => `<div class="card ${x}"><p class="text-slate-400 text-sm">${t}</p><p class="text-3xl font-bold mt-1 ${c}">${v}</p></div>`;p><p class="text-3xl font-bold mt-1 ${c}">${v}</p></div>`;
     $("#dash").innerHTML = `<div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
       ${card("Active subscriptions", d.active_subscriptions)}${card("Monthly recurring revenue", money(d.mrr), "text-violet-300")}
       ${card("Revenue collected", money(d.revenue), "text-emerald-400")}${card("Still owed", money(d.outstanding), "text-amber-300")}
-      ${card("Overdue (" + d.overdue_count + ")", money(d.overdue_amount), "text-rose-400")}</div>
-      <div class="grid lg:grid-cols-2 gap-4 mt-4">
+${card("⚠ Overdue (" + d.overdue_count + ")", money(d.overdue_amount), "text-rose-400", d.overdue_count > 0 ? "overdue-card" : "")}</div>      <div class="grid lg:grid-cols-2 gap-4 mt-4">
         <div class="card"><h3 class="font-semibold mb-3">Revenue by month</h3>${d.revenue_by_month.length ? d.revenue_by_month.map((m) => `
           <div class="flex items-center gap-2 text-sm mb-1"><span class="w-16 text-slate-400">${m.month}</span>
           <div class="h-4 rounded bg-violet-500" style="width:${Math.max(3, (m.amt / max) * 70)}%"></div><span>${money(m.amt)}</span></div>`).join("") : "<p class='text-slate-500'>No payments in this range.</p>"}</div>
