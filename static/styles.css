@@ -3,15 +3,48 @@
 .input:focus { border-color:#a78bfa; }
 .btn { background:#7c3aed !important; color:#fff !important; padding:.5rem 1rem; border-radius:.5rem; font-weight:600; cursor:pointer; }
 .btn:hover { background:#6d28d9 !important; }
-.btn-alt { background:#1e293b; color:#c4b5fd; padding:.5rem 1rem; border-radius:.5rem; font-weight:600; border:1px solid #334155; }
+.btn-alt { background:#1e293b; color:#c4b5fd; padding:.5rem 1rem; border-radius:.5rem; font-weight:600; border:1px solid #334155; cursor:pointer; }
 .btn-alt:hover { background:#334155; } .btn-alt:disabled { opacity:.4; cursor:not-allowed; }
-.btn-mini { background:#1e293b; color:#c4b5fd; padding:.15rem .6rem; border-radius:.4rem; font-size:.75rem; border:1px solid #334155; }
+.btn-mini { background:#1e293b; color:#c4b5fd; padding:.15rem .6rem; border-radius:.4rem; font-size:.75rem; border:1px solid #334155; cursor:pointer; }
 .btn-mini:hover { background:#7c3aed; color:#fff; }
-.tab { padding:.4rem .9rem; border-radius:.5rem; color:#94a3b8; } .tab.on { background:#7c3aed; color:#fff; }
+.tab { padding:.4rem .9rem; border-radius:.5rem; color:#94a3b8; cursor:pointer; } .tab.on { background:#7c3aed; color:#fff; }
 .overdue-card { border-color:#f43f5e; background:#2a0f1a; box-shadow:0 0 0 1px #f43f5e55, 0 0 20px #f43f5e33; }
+
+/* loading spinner */
+.spinner { width:28px; height:28px; border:3px solid #334155; border-top-color:#a78bfa; border-radius:50%; animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* invoice header only shows when printing */
+.print-only { display:none; }
+
+/* ---------- phone-sized screens ---------- */
+@media (max-width: 640px) {
+  header { padding:.75rem 1rem !important; gap:.5rem !important; }
+  #nav { order:3; width:100%; flex-wrap:nowrap !important; overflow-x:auto; padding-bottom:.25rem; }
+  .tab { white-space:nowrap; }
+  #main { padding:1rem !important; }
+  .card { padding:1rem; }
+  #main .input, #main select.input { width:100% !important; }
+  #modal { padding:.5rem !important; }
+  #who { display:none; }
+  .card p.text-3xl { font-size:1.4rem; }
+  .btn, .btn-alt { padding:.5rem .8rem; }
+}
+
+/* ---------- printing: a clean invoice ---------- */
 @media print {
+  body { background:#fff !important; }
   body > *:not(#modal) { display:none !important; }
-  #modal { position:static !important; background:#fff !important; }
-  #modal-body { background:#fff !important; color:#000 !important; border:0 !important; max-width:100% !important; }
+  #modal { position:static !important; background:#fff !important; display:block !important; padding:0 !important; overflow:visible !important; }
+  #modal-body { background:#fff !important; border:0 !important; max-width:100% !important; padding:0 !important; box-shadow:none !important; }
+  #modal-body, #modal-body * { color:#111 !important; }
   .no-print { display:none !important; }
+  .print-only { display:block !important; border-bottom:3px solid #7c3aed; padding-bottom:.75rem; margin-bottom:1rem; }
+  .print-only h2 { font-size:1.6rem; font-weight:800; }
+  .print-only p { font-size:.85rem; }
+  #modal-body table { width:100%; border-collapse:collapse; margin-top:.5rem; }
+  #modal-body th { border-bottom:2px solid #111 !important; padding:.4rem .5rem; text-align:left; font-size:.8rem; }
+  #modal-body td { padding:.4rem .5rem; border-top:1px solid #ccc !important; }
+  #modal-body span[class*="rounded"] { background:none !important; border:1px solid #111; }
+  #modal-body .inv-total { font-size:1.4rem; font-weight:800; border-top:2px solid #111; padding-top:.4rem; }
 }
