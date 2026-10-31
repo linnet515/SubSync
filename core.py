@@ -209,10 +209,11 @@ def send_email(to, subject, body):
             msg["From"] = os.environ.get("SMTP_FROM", "noreply@brightloop.local")
             msg["To"], msg["Subject"] = to, subject
             msg.set_content(body)
-            with smtplib.SMTP(host, int(os.environ.get("SMTP_PORT", "587")), timeout=5) as s:
-                s.starttls()
-                s.login(os.environ["SMTP_USER"], os.environ["SMTP_PASS"])
-                s.send_message(msg)
+            with smtplib.SMTP(host, int(os.environ.get("SMTP_PORT", "587")), timeout=10) as s:
+              s.starttls()
+              s.login(os.environ["SMTP_USER"], os.environ["SMTP_PASS"])
+              s.send_message(msg)
+            print(f"EMAIL SENT to {to}")
             return True
         except Exception as e:  # never let email failure break the demo
             print("EMAIL FAILED, printing instead:", e)
