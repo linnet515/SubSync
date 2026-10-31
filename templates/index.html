@@ -233,7 +233,9 @@ async function loadSubs() {
 }
 const subAct = (id, a) => safe(async () => { await api(`/api/subscriptions/${id}/action`, "POST", { action: a }); toast("Done: " + a); loadSubs(); });
 const allVariants = () => CAT.products.flatMap((p) => p.variants.map((v) => [v.id, `${p.name} – ${v.value} (+${v.extra_price})`]));
-function newSub() {
+const refreshCustomers = () => safe(async () => { CAT.customers = (await api("/api/customers")).items; });
+async function newSub() {
+  await refreshCustomers();
   const prods = [["", "— none —"]].concat(CAT.products.map((p) => [p.id, p.name]));
   const vars = [["", "— no variant —"]].concat(allVariants());
   const dflt = CAT.plans.find((p) => p.name === "Yearly Business") || CAT.plans[0];
@@ -257,7 +259,8 @@ function newSub() {
     toast("Subscription created (Draft)"); loadSubs();
   });
 }
-function fromTemplate() {
+async function fromTemplate() {
+  await refreshCustomers();
   openForm("New quotation from template", [
     { name: "template_id", label: "Template", type: "select", options: CAT.templates.map((t) => [t.id, `${t.name} (valid ${t.validity_days} days)`]), value: CAT.templates[0]?.id },
     { name: "customer_id", label: "Customer", type: "select", options: CAT.customers.map((c) => [c.id, c.name]), value: CAT.customers[0]?.id },
