@@ -61,7 +61,7 @@ If the app reports a missing column after an update, stop it, delete `app.db` an
 - No online payment gateway. Payments are recorded manually.
 
 ## Demo video
-[............]
+[https://drive.google.com/file/d/1WUeyN3j6x4bO46FIAgtuUNIqqaoU2WjK/view?usp=drive_link]
 
 ## Team Members
 - [Linnet Jijo], Team Leader
