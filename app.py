@@ -15,6 +15,7 @@ from core import (PASSWORD_RULE, close_db, init_db, one, roles_required, rows, r
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.teardown_appcontext(close_db)
 app.register_blueprint(billing_bp)
 DEMO_MODE = os.environ.get("DEMO_MODE", "1") == "1"   # shows the reset link on screen as well as in the email
@@ -340,4 +341,4 @@ def catalog_delete(name, item_id):
 if __name__ == "__main__":
     init_db()
     seed_demo()
-    app.run(debug=True, port=5000)
+    app.run(debug=os.environ.get("FLASK_DEBUG", "1") == "1", port=5000)
