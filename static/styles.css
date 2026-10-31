@@ -8,6 +8,7 @@
 .btn-mini { background:#1e293b; color:#c4b5fd; padding:.15rem .6rem; border-radius:.4rem; font-size:.75rem; border:1px solid #334155; }
 .btn-mini:hover { background:#7c3aed; color:#fff; }
 .tab { padding:.4rem .9rem; border-radius:.5rem; color:#94a3b8; } .tab.on { background:#7c3aed; color:#fff; }
+.overdue-card { border-color:#f43f5e; background:#2a0f1a; box-shadow:0 0 0 1px #f43f5e55, 0 0 20px #f43f5e33; }
 @media print {
   body > *:not(#modal) { display:none !important; }
   #modal { position:static !important; background:#fff !important; }

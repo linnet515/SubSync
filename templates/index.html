@@ -42,6 +42,7 @@ const COLORS = { draft: "bg-slate-700 text-slate-200", quotation: "bg-sky-900 te
   active: "bg-emerald-900 text-emerald-300", paused: "bg-amber-900 text-amber-300", closed: "bg-slate-800 text-slate-400",
   paid: "bg-emerald-900 text-emerald-300", cancelled: "bg-rose-900 text-rose-300", overdue: "bg-rose-900 text-rose-300" };
 const badge = (s) => `<span class="px-2 py-0.5 rounded text-xs ${COLORS[s] || "bg-slate-800"}">${esc(s)}</span>`;
+const BAR = { draft: "bg-slate-500", confirmed: "bg-indigo-500", paid: "bg-emerald-500", cancelled: "bg-rose-500", overdue: "bg-rose-500" };
 
 async function api(path, method = "GET", body) {
   const r = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -60,7 +61,7 @@ async function safe(fn) { try { return await fn(); } catch (e) { toast(e.message
 function closeModal() { $("#modal").classList.add("hidden"); }
 
 function table(cols, data) {
-  if (!data.length) return `<p class="text-slate-500 py-6 text-center">Nothing here yet.</p>`;
+  if (!data.length) return `<div class="py-10 text-center"><p class="text-4xl mb-2">📭</p><p class="text-slate-300 font-medium">Nothing here yet</p><p class="text-slate-500 text-sm">New records will show up here.</p></div>`;
   return `<div class="overflow-x-auto"><table class="w-full text-sm"><thead class="text-slate-400 text-left"><tr>
     ${cols.map((c) => `<th class="py-2 pr-3 whitespace-nowrap">${c[0]}</th>`).join("")}</tr></thead><tbody>
     ${data.map((r) => `<tr class="border-t border-slate-800">${cols.map((c) => `<td class="py-2 pr-3 whitespace-nowrap">${c[1](r)}</td>`).join("")}</tr>`).join("")}
@@ -189,11 +190,11 @@ async function loadDash() {
   await safe(async () => {
     const d = await api(`/api/dashboard?from=${$("#d-from").value}&to=${$("#d-to").value}`);
     const max = Math.max(1, ...d.revenue_by_month.map((x) => x.amt));
-    const card = (t, v, c = "") => `<div class="card"><p class="text-slate-400 text-sm">${t}</p><p class="text-3xl font-bold mt-1 ${c}">${v}</p></div>`;
+    const card = (t, v, c = "", x = "") => `<div class="card ${x}"><p class="text-slate-400 text-sm">${t}</p><p class="text-3xl font-bold mt-1 ${c}">${v}</p></div>`;
     $("#dash").innerHTML = `<div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
       ${card("Active subscriptions", d.active_subscriptions)}${card("Monthly recurring revenue", money(d.mrr), "text-violet-300")}
       ${card("Revenue collected", money(d.revenue), "text-emerald-400")}${card("Still owed", money(d.outstanding), "text-amber-300")}
-      ${card("Overdue (" + d.overdue_count + ")", money(d.overdue_amount), "text-rose-400")}</div>
+      ${card("⚠ Overdue (" + d.overdue_count + ")", money(d.overdue_amount), "text-rose-400", d.overdue_count > 0 ? "overdue-card" : "")}</div>
       <div class="grid lg:grid-cols-2 gap-4 mt-4">
         <div class="card"><h3 class="font-semibold mb-3">Revenue by month</h3>${d.revenue_by_month.length ? d.revenue_by_month.map((m) => `
           <div class="flex items-center gap-2 text-sm mb-1"><span class="w-16 text-slate-400">${m.month}</span>
@@ -201,8 +202,13 @@ async function loadDash() {
         <div class="card"><div class="flex justify-between mb-3"><h3 class="font-semibold">Overdue invoices</h3>
           <button class="btn-mini" onclick="S.inv.overdue='1';go('inv')">See all</button></div>
           ${table([["Invoice", (r) => `<a class="text-violet-400 cursor-pointer" onclick="openInvoice(${r.id})">${esc(r.number)}</a>`], ["Customer", (r) => esc(r.customer)], ["Due", (r) => r.due_date], ["Balance", (r) => money(r.balance)]], d.overdue)}</div></div>
-      <div class="card mt-4"><h3 class="font-semibold mb-2">Invoices by status</h3><div class="flex gap-4 flex-wrap">
-        ${Object.entries(d.invoice_status).map(([k, v]) => `<span>${badge(k)} <b>${v}</b></span>`).join("") || "–"}</div></div>`;
+      <div class="card mt-4"><h3 class="font-semibold mb-3">Invoices by status</h3>
+        ${Object.entries(d.invoice_status).map(([k, v]) => {
+          const total = Object.values(d.invoice_status).reduce((a, b) => a + b, 0) || 1;
+          return `<div class="flex items-center gap-3 text-sm mb-2"><span class="w-24">${badge(k)}</span>
+            <div class="flex-1 h-3 rounded bg-slate-800"><div class="h-3 rounded ${BAR[k] || "bg-violet-500"}" style="width:${Math.max(3, (v / total) * 100)}%"></div></div>
+            <b class="w-8 text-right">${v}</b></div>`;
+        }).join("") || "<p class='text-slate-500'>No invoices yet.</p>"}</div>`;
   });
 }
 
