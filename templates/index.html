@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Brightloop Subscriptions</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <div id="toast" class="hidden"></div>
+  <div id="modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-start justify-center overflow-auto p-6">
+    <div id="modal-body" class="card w-full max-w-2xl"></div>
+  </div>
+
+  <!-- ============ AUTH ============ -->
+  <section id="auth" class="hidden min-h-screen flex items-center justify-center p-6">
+    <div class="w-full max-w-md">
+      <h1 class="text-3xl font-bold text-center mb-6"><span class="text-violet-400">Bright</span>loop</h1>
+      <div class="card" id="auth-body"></div>
+    </div>
+  </section>
+
+  <!-- ============ APP ============ -->
+  <section id="app" class="hidden">
+    <header class="px-6 py-4 border-b border-slate-800 flex flex-wrap items-center gap-4">
+      <h1 class="text-xl font-bold"><span class="text-violet-400">Bright</span>loop</h1>
+      <nav id="nav" class="flex flex-wrap gap-1"></nav>
+      <span class="ml-auto text-sm text-slate-400" id="who"></span>
+      <button class="btn-alt" onclick="logout()">Log out</button>
+    </header>
+    <main id="main" class="max-w-7xl mx-auto p-6"></main>
+  </section>
+
+<script>
+/* ================= helpers ================= */
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = (n) => "₹" + Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+const todayStr = () => new Date().toLocaleDateString("en-CA");
+const COLORS = { draft: "bg-slate-700 text-slate-200", quotation: "bg-sky-900 text-sky-300", confirmed: "bg-indigo-900 text-indigo-300",
+  active: "bg-emerald-900 text-emerald-300", paused: "bg-amber-900 text-amber-300", closed: "bg-slate-800 text-slate-400",
+  paid: "bg-emerald-900 text-emerald-300", cancelled: "bg-rose-900 text-rose-300", overdue: "bg-rose-900 text-rose-300" };
+const badge = (s) => `<span class="px-2 py-0.5 rounded text-xs ${COLORS[s] || "bg-slate-800"}">${esc(s)}</span>`;
+
+async function api(path, method = "GET", body) {
+  const r = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "Request failed (" + r.status + ")");
+  return j;
+}
+function toast(msg, bad) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.className = "fixed top-4 right-4 z-[60] px-4 py-2 rounded-lg text-sm shadow-lg " + (bad ? "bg-rose-700" : "bg-emerald-700");
+  clearTimeout(window._tt);
+  window._tt = setTimeout(() => (t.className = "hidden"), 3500);
+}
+async function safe(fn) { try { return await fn(); } catch (e) { toast(e.message, true); } }
+function closeModal() { $("#modal").classList.add("hidden"); }
+
+function table(cols, data) {
+  if (!data.length) return `<p class="text-slate-500 py-6 text-center">Nothing here yet.</p>`;
+  return `<div class="overflow-x-auto"><table class="w-full text-sm"><thead class="text-slate-400 text-left"><tr>
+    ${cols.map((c) => `<th class="py-2 pr-3 whitespace-nowrap">${c[0]}</th>`).join("")}</tr></thead><tbody>
+    ${data.map((r) => `<tr class="border-t border-slate-800">${cols.map((c) => `<td class="py-2 pr-3 whitespace-nowrap">${c[1](r)}</td>`).join("")}</tr>`).join("")}
+    </tbody></table></div>`;
+}
+function pager(d, key, fn) {
+  return `<div class="flex items-center justify-between mt-3 text-sm text-slate-400"><span>${d.total} total · page ${d.page}/${d.pages}</span>
+    <span class="space-x-2"><button class="btn-alt" ${d.page <= 1 ? "disabled" : ""} onclick="S.${key}.page--;${fn}()">Prev</button>
+    <button class="btn-alt" ${d.page >= d.pages ? "disabled" : ""} onclick="S.${key}.page++;${fn}()">Next</button></span></div>`;
+}
+function selectHtml(opts, cur, attrs) {
+  return `<select class="input !w-auto" ${attrs}>${opts.map((o) => `<option value="${esc(o[0])}" ${String(o[0]) === String(cur) ? "selected" : ""}>${esc(o[1])}</option>`).join("")}</select>`;
+}
+
+/* generic pop-up form: fields = [{name,label,type,value,options}] */
+function openForm(title, fields, onSubmit) {
+  const html = fields.map((f) => {
+    const id = "f_" + f.name; let inp;
+    if (f.type === "select") inp = `<select id="${id}" class="input">${f.options.map((o) => `<option value="${esc(o[0])}" ${String(o[0]) === String(f.value ?? "") ? "selected" : ""}>${esc(o[1])}</option>`).join("")}</select>`;
+    else if (f.type === "checkbox") inp = `<input id="${id}" type="checkbox" ${f.value ? "checked" : ""} class="h-5 w-5 mt-2">`;
+    else inp = `<input id="${id}" type="${f.type || "text"}" value="${esc(f.value ?? "")}" class="input">`;
+    return `<div><label class="block text-xs text-slate-400 mb-1">${esc(f.label)}</label>${inp}</div>`;
+  }).join("");
+  $("#modal-body").innerHTML = `<h3 class="text-lg font-semibold mb-4">${esc(title)}</h3>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">${html}</div><p id="f_err" class="text-rose-400 text-sm mt-3"></p>
+    <div class="flex justify-end gap-2 mt-4"><button class="btn-alt" onclick="closeModal()">Cancel</button><button id="f_ok" class="btn">Save</button></div>`;
+  $("#modal").classList.remove("hidden");
+  $("#f_ok").onclick = async () => {
+    const v = {};
+    fields.forEach((f) => { const el = $("#f_" + f.name);
+      v[f.name] = f.type === "checkbox" ? el.checked : f.type === "number" ? (el.value === "" ? null : Number(el.value)) : el.value; });
+    try { await onSubmit(v); closeModal(); } catch (e) { $("#f_err").textContent = e.message; }
+  };
+}
+
+/* ================= state ================= */
+let ME = null, CAT = {}, CUR = "", CATTAB = "products";
+const S = { subs: { page: 1, status: "", q: "" }, inv: { page: 1, status: "", q: "", overdue: "" }, pay: { page: 1 } };
+
+/* ================= auth screens ================= */
+function showAuth(mode, msg) {
+  $("#app").classList.add("hidden"); $("#auth").classList.remove("hidden");
+  const b = $("#auth-body"), note = msg ? `<p class="text-emerald-400 text-sm mb-3">${esc(msg)}</p>` : "";
+  const link = (m, t) => `<a href="#" class="text-violet-400" onclick="showAuth('${m}');return false">${t}</a>`;
+  if (mode === "login") b.innerHTML = `${note}<h2 class="text-xl font-semibold mb-4">Sign in</h2>
+    <input id="a-email" class="input" value="admin@brightloop.com" placeholder="Email">
+    <input id="a-pass" type="password" class="input mt-3" value="Admin@12345" placeholder="Password">
+    <p id="a-err" class="text-rose-400 text-sm mt-2"></p>
+    <button class="btn w-full mt-3" onclick="doLogin()">Sign in</button>
+    <div class="flex gap-2 mt-3 text-xs text-slate-400 items-center">Demo:
+      <button class="btn-mini" onclick="fill('admin@brightloop.com','Admin@12345')">Admin</button>
+      <button class="btn-mini" onclick="fill('staff@brightloop.com','Staff@12345')">Staff</button>
+      <button class="btn-mini" onclick="fill('customer@acme.com','Customer@123')">Customer</button></div>
+    <div class="flex justify-between mt-4 text-sm">${link("signup", "Create account")}${link("forgot", "Forgot password?")}</div>`;
+  if (mode === "signup") b.innerHTML = `<h2 class="text-xl font-semibold mb-4">Create your account</h2>
+    <input id="a-name" class="input" value="Pixel Studio" placeholder="Business / your name">
+    <input id="a-email" class="input mt-3" value="hello@pixelstudio.com" placeholder="Email">
+    <input id="a-pass" type="password" class="input mt-3" value="Welcome@2026" placeholder="Password">
+    <p class="text-xs text-slate-500 mt-1">More than 8 characters, with upper case, lower case and a special character.</p>
+    <p id="a-err" class="text-rose-400 text-sm mt-2"></p>
+    <button class="btn w-full mt-3" onclick="doSignup()">Sign up</button><div class="mt-4 text-sm">${link("login", "Back to sign in")}</div>`;
+  if (mode === "forgot") b.innerHTML = `<h2 class="text-xl font-semibold mb-4">Reset password</h2>
+    <input id="a-email" class="input" value="customer@acme.com" placeholder="Registered email">
+    <p id="a-err" class="text-sm mt-2"></p><button class="btn w-full mt-3" onclick="doForgot()">Send reset link</button>
+    <div class="mt-4 text-sm">${link("login", "Back to sign in")}</div>`;
+  if (mode === "reset") b.innerHTML = `<h2 class="text-xl font-semibold mb-4">Choose a new password</h2>
+    <input id="a-pass" type="password" class="input" value="NewPass@2026" placeholder="New password">
+    <p id="a-err" class="text-rose-400 text-sm mt-2"></p><button class="btn w-full mt-3" onclick="doReset()">Save password</button>`;
+}
+const fill = (e, p) => { $("#a-email").value = e; $("#a-pass").value = p; };
+const authErr = (e) => { $("#a-err").className = "text-rose-400 text-sm mt-2"; $("#a-err").textContent = e.message; };
+async function doLogin() { try { await api("/api/login", "POST", { email: $("#a-email").value, password: $("#a-pass").value }); boot(); } catch (e) { authErr(e); } }
+async function doSignup() { try { await api("/api/signup", "POST", { name: $("#a-name").value, email: $("#a-email").value, password: $("#a-pass").value }); boot(); } catch (e) { authErr(e); } }
+async function doForgot() {
+  try { const r = await api("/api/forgot", "POST", { email: $("#a-email").value }); const el = $("#a-err");
+    el.className = "text-emerald-400 text-sm mt-2";
+    el.innerHTML = esc(r.message) + (r.dev_link ? `<br><span class="text-slate-400">Demo link: </span><a class="text-violet-400 break-all" href="${esc(r.dev_link)}">${esc(r.dev_link)}</a>` : "");
+  } catch (e) { authErr(e); }
+}
+async function doReset() {
+  try { await api("/api/reset", "POST", { token: location.hash.replace("#reset=", ""), password: $("#a-pass").value });
+    history.replaceState(null, "", location.pathname); showAuth("login", "Password updated. Please sign in.");
+  } catch (e) { authErr(e); }
+}
+async function logout() { await api("/api/logout", "POST"); ME = null; showAuth("login"); }
+window.addEventListener("hashchange", () => { if (location.hash.startsWith("#reset=")) showAuth("reset"); });
+
+/* ================= boot + navigation ================= */
+async function boot() {
+  try { ME = (await api("/api/me")).user; } catch (e) { ME = null; }
+  if (location.hash.startsWith("#reset=")) return showAuth("reset");
+  if (!ME) return showAuth("login");
+  $("#auth").classList.add("hidden"); $("#app").classList.remove("hidden");
+  $("#who").textContent = ME.name + " · " + ME.role;
+  if (ME.role !== "customer") await loadCat();
+  const tabs = ME.role === "customer" ? [["subs", "My subscriptions"], ["inv", "My invoices"]]
+    : [["dash", "Dashboard"], ["subs", "Subscriptions"], ["inv", "Invoices"], ["pay", "Payments"], ["cat", "Catalog"]].concat(ME.role === "admin" ? [["staff", "Staff"]] : []);
+  $("#nav").innerHTML = tabs.map((t) => `<button class="tab" id="tab-${t[0]}" onclick="go('${t[0]}')">${t[1]}</button>`).join("");
+  go(tabs[0][0]);
+}
+async function loadCat() {
+  const names = ["products", "plans", "taxes", "discounts", "templates"];
+  const res = await Promise.all(names.map((n) => api("/api/catalog/" + n)));
+  names.forEach((n, i) => (CAT[n] = res[i].items));
+  CAT.customers = (await api("/api/customers")).items;
+}
+function go(tab) {
+  CUR = tab;
+  document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("on", b.id === "tab-" + tab));
+  ({ dash: vDash, subs: vSubs, inv: vInv, pay: vPay, cat: vCat, staff: vStaff })[tab]();
+}
+
+/* ================= dashboard ================= */
+function vDash() {
+  $("#main").innerHTML = `<div class="flex flex-wrap items-end gap-3 mb-4"><h2 class="text-xl font-semibold mr-auto">Finance dashboard</h2>
+    <div><label class="text-xs text-slate-400">From</label><input id="d-from" type="date" class="input !w-auto"></div>
+    <div><label class="text-xs text-slate-400">To</label><input id="d-to" type="date" class="input !w-auto"></div>
+    <button class="btn-alt" onclick="loadDash()">Apply</button><button class="btn" onclick="runBilling()">▶ Run billing now</button></div><div id="dash"></div>`;
+  loadDash();
+}
+async function runBilling() {
+  await safe(async () => { const r = await api("/api/billing/run", "POST", { auto_confirm: true });
+    toast(`Checked ${r.subscriptions_checked} subscriptions · ${r.invoices_created} invoices created · ${r.auto_closed} auto-closed`); loadDash(); });
+}
+async function loadDash() {
+  await safe(async () => {
+    const d = await api(`/api/dashboard?from=${$("#d-from").value}&to=${$("#d-to").value}`);
+    const max = Math.max(1, ...d.revenue_by_month.map((x) => x.amt));
+    const card = (t, v, c = "") => `<div class="card"><p class="text-slate-400 text-sm">${t}</p><p class="text-3xl font-bold mt-1 ${c}">${v}</p></div>`;
+    $("#dash").innerHTML = `<div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      ${card("Active subscriptions", d.active_subscriptions)}${card("Monthly recurring revenue", money(d.mrr), "text-violet-300")}
+      ${card("Revenue collected", money(d.revenue), "text-emerald-400")}${card("Still owed", money(d.outstanding), "text-amber-300")}
+      ${card("Overdue (" + d.overdue_count + ")", money(d.overdue_amount), "text-rose-400")}</div>
+      <div class="grid lg:grid-cols-2 gap-4 mt-4">
+        <div class="card"><h3 class="font-semibold mb-3">Revenue by month</h3>${d.revenue_by_month.length ? d.revenue_by_month.map((m) => `
+          <div class="flex items-center gap-2 text-sm mb-1"><span class="w-16 text-slate-400">${m.month}</span>
+          <div class="h-4 rounded bg-violet-500" style="width:${Math.max(3, (m.amt / max) * 70)}%"></div><span>${money(m.amt)}</span></div>`).join("") : "<p class='text-slate-500'>No payments in this range.</p>"}</div>
+        <div class="card"><div class="flex justify-between mb-3"><h3 class="font-semibold">Overdue invoices</h3>
+          <button class="btn-mini" onclick="S.inv.overdue='1';go('inv')">See all</button></div>
+          ${table([["Invoice", (r) => `<a class="text-violet-400 cursor-pointer" onclick="openInvoice(${r.id})">${esc(r.number)}</a>`], ["Customer", (r) => esc(r.customer)], ["Due", (r) => r.due_date], ["Balance", (r) => money(r.balance)]], d.overdue)}</div></div>
+      <div class="card mt-4"><h3 class="font-semibold mb-2">Invoices by status</h3><div class="flex gap-4 flex-wrap">
+        ${Object.entries(d.invoice_status).map(([k, v]) => `<span>${badge(k)} <b>${v}</b></span>`).join("") || "–"}</div></div>`;
+  });
+}
+
+/* ================= subscriptions ================= */
+const SUB_BTNS = { draft: [["quote", "Send quote"]], quotation: [["confirm", "Confirm"]], confirmed: [["activate", "Activate"]],
+  active: [["pause", "Pause"], ["renew", "Renew"], ["close", "Close"]], paused: [["resume", "Resume"], ["close", "Close"]], closed: [["renew", "Reopen"]] };
+const CUST_OK = ["pause", "resume", "close", "renew"];
+function vSubs() {
+  const f = S.subs, staff = ME.role !== "customer";
+  $("#main").innerHTML = `<div class="flex flex-wrap items-center gap-3 mb-4"><h2 class="text-xl font-semibold mr-auto">${staff ? "Subscriptions" : "My subscriptions"}</h2>
+    ${selectHtml([["", "All statuses"], ["draft", "Draft"], ["quotation", "Quotation"], ["confirmed", "Confirmed"], ["active", "Active"], ["paused", "Paused"], ["closed", "Closed"]], f.status, `onchange="S.subs.status=this.value;S.subs.page=1;loadSubs()"`)}
+    <input class="input !w-48" placeholder="Search…" value="${esc(f.q)}" onchange="S.subs.q=this.value;S.subs.page=1;loadSubs()">
+    ${staff ? `<button class="btn" onclick="newSub()">+ New</button><button class="btn-alt" onclick="fromTemplate()">From template</button>` : ""}</div><div id="list"></div>`;
+  loadSubs();
+}
+async function loadSubs() {
+  await safe(async () => {
+    const f = S.subs, staff = ME.role !== "customer";
+    const d = await api("/api/subscriptions?" + new URLSearchParams({ page: f.page, status: f.status, q: f.q }));
+    $("#list").innerHTML = `<div class="card">${table([
+      ["Number", (r) => `<b>${esc(r.number)}</b>`], ["Customer", (r) => esc(r.customer)], ["Plan", (r) => esc(r.plan)],
+      ["Per " + "period", (r) => money(r.amount) + " / " + r.billing_period.replace("ly", "")], ["Term", (r) => r.start_date + " → " + r.expiry_date],
+      ["Next invoice", (r) => r.next_invoice_date || "–"], ["Status", (r) => badge(r.status)],
+      ["", (r) => (SUB_BTNS[r.status] || []).filter((b) => staff || CUST_OK.includes(b[0])).map((b) => `<button class="btn-mini" onclick="subAct(${r.id},'${b[0]}')">${b[1]}</button>`).join(" ")],
+    ], d.items)}${pager(d, "subs", "loadSubs")}</div>`;
+  });
+}
+const subAct = (id, a) => safe(async () => { await api(`/api/subscriptions/${id}/action`, "POST", { action: a }); toast("Done: " + a); loadSubs(); });
+const allVariants = () => CAT.products.flatMap((p) => p.variants.map((v) => [v.id, `${p.name} – ${v.value} (+${v.extra_price})`]));
+function newSub() {
+  const prods = [["", "— none —"]].concat(CAT.products.map((p) => [p.id, p.name]));
+  const vars = [["", "— no variant —"]].concat(allVariants());
+  const dflt = CAT.plans.find((p) => p.name === "Yearly Business") || CAT.plans[0];
+  const odoo = allVariants().find((v) => v[1].includes("Odoo"));
+  openForm("New subscription", [
+    { name: "customer_id", label: "Customer", type: "select", options: CAT.customers.map((c) => [c.id, c.name]), value: CAT.customers[0]?.id },
+    { name: "plan_id", label: "Plan", type: "select", options: CAT.plans.map((p) => [p.id, `${p.name} – ${money(p.price)}/${p.billing_period}`]), value: dflt.id },
+    { name: "start_date", label: "Start date", type: "date", value: todayStr() },
+    { name: "expiry_date", label: "Expiry date (blank = 1 year)", type: "date", value: "" },
+    { name: "payment_terms", label: "Payment terms", type: "select", options: [["Immediate", "Immediate"], ["Net 15", "Net 15"], ["Net 30", "Net 30"]], value: "Net 15" },
+    { name: "p1", label: "Product 1", type: "select", options: prods, value: CAT.products[0]?.id },
+    { name: "v1", label: "Variant 1", type: "select", options: vars, value: odoo ? odoo[0] : "" },
+    { name: "q1", label: "Quantity 1", type: "number", value: 5 },
+    { name: "p2", label: "Product 2 (optional)", type: "select", options: prods, value: "" },
+    { name: "v2", label: "Variant 2", type: "select", options: vars, value: "" },
+    { name: "q2", label: "Quantity 2", type: "number", value: 1 },
+  ], async (v) => {
+    const lines = [];
+    [1, 2].forEach((i) => { if (v["p" + i]) lines.push({ product_id: Number(v["p" + i]), variant_id: v["v" + i] ? Number(v["v" + i]) : null, qty: v["q" + i] || 1 }); });
+    await api("/api/subscriptions", "POST", { customer_id: Number(v.customer_id), plan_id: Number(v.plan_id), start_date: v.start_date, expiry_date: v.expiry_date || null, payment_terms: v.payment_terms, lines });
+    toast("Subscription created (Draft)"); loadSubs();
+  });
+}
+function fromTemplate() {
+  openForm("New quotation from template", [
+    { name: "template_id", label: "Template", type: "select", options: CAT.templates.map((t) => [t.id, `${t.name} (valid ${t.validity_days} days)`]), value: CAT.templates[0]?.id },
+    { name: "customer_id", label: "Customer", type: "select", options: CAT.customers.map((c) => [c.id, c.name]), value: CAT.customers[0]?.id },
+    { name: "start_date", label: "Start date", type: "date", value: todayStr() },
+  ], async (v) => { await api("/api/subscriptions/from-template", "POST", { template_id: Number(v.template_id), customer_id: Number(v.customer_id), start_date: v.start_date }); toast("Quotation created from template"); loadSubs(); });
+}
+
+/* ================= invoices ================= */
+function vInv() {
+  const f = S.inv, staff = ME.role !== "customer";
+  $("#main").innerHTML = `<div class="flex flex-wrap items-center gap-3 mb-4"><h2 class="text-xl font-semibold mr-auto">${staff ? "Invoices" : "My invoices"}</h2>
+    ${selectHtml([["", "All statuses"], ["draft", "Draft"], ["confirmed", "Confirmed"], ["paid", "Paid"], ["cancelled", "Cancelled"]], f.status, `onchange="S.inv.status=this.value;S.inv.page=1;loadInv()"`)}
+    ${selectHtml([["", "All"], ["1", "Overdue only"]], f.overdue, `onchange="S.inv.overdue=this.value;S.inv.page=1;loadInv()"`)}
+    <input class="input !w-48" placeholder="Search…" value="${esc(f.q)}" onchange="S.inv.q=this.value;S.inv.page=1;loadInv()"></div><div id="list"></div>`;
+  loadInv();
+}
+async function loadInv() {
+  await safe(async () => {
+    const f = S.inv;
+    const d = await api("/api/invoices?" + new URLSearchParams({ page: f.page, status: f.status, q: f.q, overdue: f.overdue }));
+    $("#list").innerHTML = `<div class="card">${table([
+      ["Number", (r) => `<a class="text-violet-400 cursor-pointer font-semibold" onclick="openInvoice(${r.id})">${esc(r.number)}</a>`],
+      ["Customer", (r) => esc(r.customer)], ["Issued", (r) => r.issue_date], ["Due", (r) => r.due_date],
+      ["Total", (r) => money(r.total)], ["Balance", (r) => money(r.balance)], ["Status", (r) => badge(r.overdue ? "overdue" : r.status)],
+    ], d.items)}${pager(d, "inv", "loadInv")}</div>`;
+  });
+}
+async function invAct(id, a) { await safe(async () => { await api(`/api/invoices/${id}/${a}`, "POST"); toast("Invoice " + a + (a === "send" ? " (email sent)" : "ed")); openInvoice(id); if (CUR === "inv") loadInv(); }); }
+async function openInvoice(id) {
+  await safe(async () => {
+    const { invoice: i, lines, payments } = await api("/api/invoices/" + id), staff = ME.role !== "customer";
+    $("#modal-body").innerHTML = `<div class="flex justify-between items-start"><div><h3 class="text-xl font-bold">${esc(i.number)}</h3>
+        <p class="text-sm text-slate-400">${esc(i.customer)} · ${esc(i.sub_number)}</p>
+        <p class="text-sm text-slate-400">Issued ${i.issue_date} · Due ${i.due_date}</p></div>${badge(i.overdue ? "overdue" : i.status)}</div>
+      <div class="mt-4">${table([["Description", (r) => esc(r.description)], ["Qty", (r) => r.qty], ["Unit", (r) => money(r.unit_price)], ["Discount", (r) => r.discount ? "-" + money(r.discount) : "–"], ["Tax", (r) => r.tax_rate + "%"], ["Amount", (r) => money(r.amount)]], lines)}</div>
+      <div class="text-right text-sm mt-3 space-y-1"><p>Subtotal ${money(i.subtotal)}</p><p class="text-emerald-400">Discounts -${money(i.discount_total)}</p><p>Tax ${money(i.tax_total)}</p>
+        <p class="text-xl font-bold">Total ${money(i.total)}</p><p>Paid ${money(i.amount_paid)} · <b class="${i.balance > 0 ? "text-amber-300" : "text-emerald-400"}">Balance ${money(i.balance)}</b></p></div>
+      <h4 class="font-semibold mt-4 mb-1">Payments</h4>${table([["Date", (r) => r.pay_date], ["Method", (r) => esc(r.method)], ["Amount", (r) => money(r.amount)], ["Note", (r) => esc(r.note)]], payments)}
+      <div class="flex flex-wrap justify-end gap-2 mt-5 no-print">
+        ${staff && i.status === "draft" ? `<button class="btn" onclick="invAct(${id},'confirm')">Confirm</button>` : ""}
+        ${staff && i.status === "confirmed" ? `<button class="btn" onclick="payForm(${id},${i.balance})">Record payment</button>` : ""}
+        ${staff && !["draft", "cancelled"].includes(i.status) ? `<button class="btn-alt" onclick="invAct(${id},'send')">Send email</button>` : ""}
+        ${staff && ["draft", "confirmed"].includes(i.status) && !i.amount_paid ? `<button class="btn-alt" onclick="invAct(${id},'cancel')">Cancel</button>` : ""}
+        <button class="btn-alt" onclick="window.print()">Print</button><button class="btn-alt" onclick="closeModal()">Close</button></div>`;
+    $("#modal").classList.remove("hidden");
+  });
+}
+function payForm(id, balance) {
+  openForm("Record payment", [
+    { name: "method", label: "Method", type: "select", options: ["Bank transfer", "UPI", "Card", "Cash", "Cheque"].map((m) => [m, m]), value: "Bank transfer" },
+    { name: "amount", label: "Amount", type: "number", value: balance },
+    { name: "pay_date", label: "Date", type: "date", value: todayStr() },
+    { name: "note", label: "Note", value: "Received against invoice" },
+  ], async (v) => { await api(`/api/invoices/${id}/payments`, "POST", v); toast("Payment recorded"); setTimeout(() => { openInvoice(id); if (CUR === "inv") loadInv(); }, 60); });
+}
+
+/* ================= payments ================= */
+function vPay() { $("#main").innerHTML = `<h2 class="text-xl font-semibold mb-4">Payments</h2><div id="list"></div>`; loadPay(); }
+async function loadPay() {
+  await safe(async () => {
+    const d = await api("/api/payments?page=" + S.pay.page);
+    $("#list").innerHTML = `<div class="card">${table([["Date", (r) => r.pay_date], ["Invoice", (r) => `<a class="text-violet-400 cursor-pointer" onclick="openInvoice(${r.invoice_id})">${esc(r.invoice)}</a>`],
+      ["Customer", (r) => esc(r.customer)], ["Method", (r) => esc(r.method)], ["Amount", (r) => money(r.amount)], ["Note", (r) => esc(r.note)]], d.items)}${pager(d, "pay", "loadPay")}</div>`;
+  });
+}
+
+/* ================= catalog (admin edits, staff reads) ================= */
+function catCfg() {
+  const flag = (n, l) => ({ name: n, label: l, type: "checkbox", value: true });
+  const prodOpts = CAT.products.map((p) => [p.id, p.name]);
+  return {
+    products: { title: "Products", add: "New product",
+      cols: [["Name", (r) => esc(r.name)], ["Type", (r) => esc(r.type)], ["Sales", (r) => money(r.sales_price)], ["Cost", (r) => money(r.cost_price)],
+        ["Variants", (r) => esc(r.variants.map((v) => `${v.value} (+${v.extra_price})`).join(", ") || "–")], ["Notes", (r) => esc(r.notes)]],
+      fields: [{ name: "name", label: "Name", value: "Brightloop Analytics" }, { name: "type", label: "Type", type: "select", options: [["software", "software"], ["add-on", "add-on"], ["service", "service"]], value: "software" },
+        { name: "sales_price", label: "Sales price", type: "number", value: 2000 }, { name: "cost_price", label: "Cost price", type: "number", value: 700 }, { name: "notes", label: "Notes", value: "Dashboards and reports" }] },
+    plans: { title: "Plans", add: "New plan",
+      cols: [["Name", (r) => esc(r.name)], ["Price", (r) => money(r.price)], ["Billing", (r) => r.billing_period], ["Min qty", (r) => r.min_qty], ["Available", (r) => `${r.start_date || "any"} → ${r.end_date || "open"}`],
+        ["Auto-close", (r) => (r.auto_close ? "yes" : "no")], ["Pause", (r) => (r.allow_pause ? "yes" : "no")], ["Early close", (r) => (r.allow_early_close ? "yes" : "no")], ["Renew", (r) => (r.allow_renew ? "yes" : "no")]],
+      fields: [{ name: "name", label: "Name", value: "Quarterly Plus" }, { name: "price", label: "Price", type: "number", value: 2499 },
+        { name: "billing_period", label: "Billing period", type: "select", options: ["daily", "weekly", "monthly", "yearly"].map((x) => [x, x]), value: "monthly" },
+        { name: "min_qty", label: "Minimum quantity", type: "number", value: 1 }, { name: "start_date", label: "Available from", type: "date", value: todayStr() }, { name: "end_date", label: "Available until (optional)", type: "date", value: "" },
+        flag("auto_close", "Close automatically at end date"), flag("allow_early_close", "Allow early close"), flag("allow_pause", "Allow pause"), flag("allow_renew", "Allow renew")] },
+    taxes: { title: "Taxes", add: "New tax", cols: [["Name", (r) => esc(r.name)], ["Rate", (r) => r.rate_percent + "%"]],
+      fields: [{ name: "name", label: "Name", value: "GST 12%" }, { name: "rate_percent", label: "Rate %", type: "number", value: 12 }] },
+    discounts: { title: "Discounts", add: "New discount",
+      cols: [["Name", (r) => esc(r.name)], ["Value", (r) => (r.kind === "percent" ? r.value + "%" : money(r.value))], ["Min amount", (r) => money(r.min_amount)], ["Min qty", (r) => r.min_qty], ["Valid", (r) => `${r.start_date || "any"} → ${r.end_date || "open"}`],
+        ["Used", (r) => `${r.used_count}/${r.usage_limit ?? "∞"}`], ["Applies to", (r) => esc((CAT.products.find((p) => p.id === r.product_id) || { name: "Whole subscription" }).name)]],
+      fields: [{ name: "name", label: "Name", value: "Loyalty 15%" }, { name: "kind", label: "Type", type: "select", options: [["percent", "Percentage"], ["fixed", "Fixed amount"]], value: "percent" },
+        { name: "value", label: "Value", type: "number", value: 15 }, { name: "min_amount", label: "Minimum purchase", type: "number", value: 0 }, { name: "min_qty", label: "Minimum quantity", type: "number", value: 5 },
+        { name: "start_date", label: "Start date", type: "date", value: todayStr() }, { name: "end_date", label: "End date", type: "date", value: "" }, { name: "usage_limit", label: "Usage limit", type: "number", value: 50 },
+        { name: "product_id", label: "Applies to", type: "select", options: [["", "Whole subscription"]].concat(prodOpts), value: "" }] },
+    templates: { title: "Quotation templates", add: "New template",
+      cols: [["Name", (r) => esc(r.name)], ["Plan", (r) => esc((CAT.plans.find((p) => p.id === r.plan_id) || {}).name)], ["Valid for", (r) => r.validity_days + " days"],
+        ["Lines", (r) => esc(JSON.parse(r.lines_json || "[]").map((l) => `${l.qty} × ${(CAT.products.find((p) => p.id === l.product_id) || {}).name}`).join(", "))]],
+      fields: [{ name: "name", label: "Name", value: "SMB Starter" }, { name: "plan_id", label: "Plan", type: "select", options: CAT.plans.map((p) => [p.id, p.name]), value: CAT.plans[0]?.id },
+        { name: "validity_days", label: "Valid for (days)", type: "number", value: 15 }, { name: "product_id", label: "Product", type: "select", options: prodOpts, value: CAT.products[0]?.id },
+        { name: "variant_id", label: "Variant", type: "select", options: [["", "— none —"]].concat(allVariants()), value: "" }, { name: "qty", label: "Quantity", type: "number", value: 3 }],
+      pre: (v) => ({ name: v.name, plan_id: v.plan_id, validity_days: v.validity_days, lines_json: JSON.stringify([{ product_id: Number(v.product_id), variant_id: v.variant_id ? Number(v.variant_id) : null, qty: v.qty || 1 }]) }) },
+  };
+}
+function vCat() {
+  const cfg = catCfg(), c = cfg[CATTAB], admin = ME.role === "admin";
+  $("#main").innerHTML = `<div class="flex flex-wrap gap-2 mb-4 items-center">${Object.keys(cfg).map((k) => `<button class="tab ${k === CATTAB ? "on" : ""}" onclick="CATTAB='${k}';vCat()">${cfg[k].title}</button>`).join("")}
+    <span class="ml-auto space-x-2">${admin ? `<button class="btn" onclick="addCat()">+ ${c.add}</button>${CATTAB === "products" ? `<button class="btn-alt" onclick="addVariant()">+ Variant</button>` : ""}` : `<span class="text-xs text-slate-500">Read-only for staff — only the admin can edit</span>`}</span></div>
+    <div class="card">${table(c.cols, CAT[CATTAB])}</div>`;
+}
+function addCat() {
+  const c = catCfg()[CATTAB];
+  openForm(c.add, c.fields, async (v) => { await api("/api/catalog/" + CATTAB, "POST", c.pre ? c.pre(v) : v); await loadCat(); toast("Saved"); vCat(); });
+}
+function addVariant() {
+  openForm("New variant", [{ name: "product_id", label: "Product", type: "select", options: CAT.products.map((p) => [p.id, p.name]), value: CAT.products[0]?.id },
+    { name: "attribute", label: "Attribute", value: "Brand" }, { name: "value", label: "Value", value: "SAP" }, { name: "extra_price", label: "Extra price", type: "number", value: 800 }],
+    async (v) => { await api("/api/catalog/variants", "POST", v); await loadCat(); toast("Variant added"); vCat(); });
+}
+
+/* ================= staff (admin only) ================= */
+async function vStaff() {
+  await safe(async () => {
+    const d = await api("/api/staff");
+    $("#main").innerHTML = `<div class="flex mb-4"><h2 class="text-xl font-semibold mr-auto">Team</h2><button class="btn" onclick="addStaff()">+ Add staff member</button></div>
+      <div class="card">${table([["Name", (r) => esc(r.name)], ["Email", (r) => esc(r.email)], ["Role", (r) => badge(r.role)], ["Created", (r) => r.created]], d.items)}</div>`;
+  });
+}
+function addStaff() {
+  openForm("Add staff member", [{ name: "name", label: "Name", value: "Riya Sharma" }, { name: "email", label: "Email", value: "riya@brightloop.com" }, { name: "password", label: "Password", type: "password", value: "Staff@2026!" }],
+    async (v) => { await api("/api/staff", "POST", v); toast("Staff member added"); vStaff(); });
+}
+
+boot();
+</script>
+</body>
+</html>
