@@ -210,6 +210,7 @@ async function loadDash() {
 const SUB_BTNS = { draft: [["quote", "Send quote"]], quotation: [["confirm", "Confirm"]], confirmed: [["activate", "Activate"]],
   active: [["pause", "Pause"], ["renew", "Renew"], ["close", "Close"]], paused: [["resume", "Resume"], ["close", "Close"]], closed: [["renew", "Reopen"]] };
 const CUST_OK = ["pause", "resume", "close", "renew"];
+const PERIOD = { daily: "day", weekly: "week", monthly: "month", yearly: "year" };
 function vSubs() {
   const f = S.subs, staff = ME.role !== "customer";
   $("#main").innerHTML = `<div class="flex flex-wrap items-center gap-3 mb-4"><h2 class="text-xl font-semibold mr-auto">${staff ? "Subscriptions" : "My subscriptions"}</h2>
@@ -224,7 +225,7 @@ async function loadSubs() {
     const d = await api("/api/subscriptions?" + new URLSearchParams({ page: f.page, status: f.status, q: f.q }));
     $("#list").innerHTML = `<div class="card">${table([
       ["Number", (r) => `<b>${esc(r.number)}</b>`], ["Customer", (r) => esc(r.customer)], ["Plan", (r) => esc(r.plan)],
-      ["Per " + "period", (r) => money(r.amount) + " / " + r.billing_period.replace("ly", "")], ["Term", (r) => r.start_date + " → " + r.expiry_date],
+      ["Per period", (r) => money(r.amount) + " / " + (PERIOD[r.billing_period] || r.billing_period)], ["Term", (r) => r.start_date + " → " + r.expiry_date],
       ["Next invoice", (r) => r.next_invoice_date || "–"], ["Status", (r) => badge(r.status)],
       ["", (r) => (SUB_BTNS[r.status] || []).filter((b) => staff || CUST_OK.includes(b[0])).map((b) => `<button class="btn-mini" onclick="subAct(${r.id},'${b[0]}')">${b[1]}</button>`).join(" ")],
     ], d.items)}${pager(d, "subs", "loadSubs")}</div>`;
