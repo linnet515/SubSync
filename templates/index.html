@@ -63,7 +63,7 @@ function toast(msg, bad) {
   clearTimeout(window._tt);
   window._tt = setTimeout(() => (t.className = "hidden"), 3500);
 }
-async function safe(fn) { try { return await fn(); } catch (e) { toast(e.message, true); } }
+async function safe(fn) { try { return await fn(); } catch (e) { toast(e.message, true); document.querySelectorAll(".spinner").forEach((s) => { s.parentElement.innerHTML = `<p class="text-rose-400">Could not load: ${esc(e.message)} <button class="btn-mini" onclick="go(CUR)">Retry</button></p>`; }); } }
 function closeModal() { $("#modal").classList.add("hidden"); }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
 
