@@ -202,6 +202,7 @@ async function loadDash() {
   await safe(async () => {
     $("#dash").innerHTML = loading();
     const d = await api(`/api/dashboard?from=${$("#d-from").value}&to=${$("#d-to").value}`);
+    const rn = await api("/api/renewals?days=30").catch(() => ({ items: [] }));
     const months = [...d.revenue_by_month].sort((a, b) => String(a.month).localeCompare(String(b.month)));
     const max = Math.max(1, ...months.map((x) => x.amt));
     const card = (t, v, c = "", x = "") => `<div class="card ${x}"><p class="text-slate-400 text-sm">${t}</p><p class="text-3xl font-bold mt-1 ${c}">${v}</p></div>`;
@@ -220,7 +221,11 @@ async function loadDash() {
       <div class="card mt-4"><h3 class="font-semibold mb-3">Invoices by status</h3>
         ${Object.entries(d.invoice_status).map(([k, v]) => `<div class="flex items-center gap-3 text-sm mb-2"><span class="w-24 shrink-0">${badge(k)}</span>
             <div class="flex-1 h-3 rounded bg-slate-800"><div class="h-3 rounded ${BAR[k] || "bg-violet-500"}" style="width:${Math.max(3, (v / total) * 100)}%"></div></div>
-            <b class="w-8 text-right">${v}</b></div>`).join("") || "<p class='text-slate-500'>No invoices yet.</p>"}</div>`;
+            <b class="w-8 text-right">${v}</b></div>`).join("") || "<p class='text-slate-500'>No invoices yet.</p>"}</div>
+      <div class="card mt-4"><h3 class="font-semibold mb-3">🔔 Renewals due (next 30 days)</h3>
+        ${table([["Subscription", (r) => `<b>${esc(r.number)}</b>`], ["Customer", (r) => esc(r.customer)], ["Plan", (r) => esc(r.plan)], ["Expires", (r) => r.expiry_date],
+          ["Time left", (r) => `<span class="font-semibold ${r.days_left < 0 ? "text-rose-400" : r.days_left <= 7 ? "text-amber-300" : "text-slate-300"}">${r.days_left < 0 ? "Expired " + Math.abs(r.days_left) + " days ago" : r.days_left + " days"}</span>`],
+          ["", (r) => (r.allow_renew ? `<button class="btn-mini" onclick="renewSub(${r.id})">Renew</button>` : "")]], rn.items)}</div>`;
   });
 }
 
@@ -242,15 +247,17 @@ async function loadSubs() {
     $("#list").innerHTML = loading();
     const f = S.subs, staff = ME.role !== "customer";
     const d = await api("/api/subscriptions?" + new URLSearchParams({ page: f.page, status: f.status, q: f.q }));
+    window.SUBS = d.items;
     $("#list").innerHTML = `<div class="card">${table([
       ["Number", (r) => `<b>${esc(r.number)}</b>`], ["Customer", (r) => esc(r.customer)], ["Plan", (r) => esc(r.plan)],
       ["Per period", (r) => money(r.amount) + " / " + (PERIOD[r.billing_period] || r.billing_period)], ["Term", (r) => r.start_date + " → " + r.expiry_date],
       ["Next invoice", (r) => r.next_invoice_date || "–"], ["Status", (r) => badge(r.status)],
-      ["", (r) => (SUB_BTNS[r.status] || []).filter((b) => staff || CUST_OK.includes(b[0])).map((b) => `<button class="btn-mini" onclick="subAct(${r.id},'${b[0]}')">${b[1]}</button>`).join(" ")],
+      ["", (r) => (staff && r.status === "draft" ? `<button class="btn-mini" onclick="editSub(${r.id})">Edit</button> ` : "") + (SUB_BTNS[r.status] || []).filter((b) => staff || CUST_OK.includes(b[0])).map((b) => `<button class="btn-mini" onclick="subAct(${r.id},'${b[0]}')">${b[1]}</button>`).join(" ")],
     ], d.items)}${pager(d, "subs", "loadSubs")}</div>`;
   });
 }
 const subAct = (id, a) => safe(async () => { await api(`/api/subscriptions/${id}/action`, "POST", { action: a }); toast("Done: " + a); loadSubs(); });
+const renewSub = (id) => safe(async () => { await api(`/api/subscriptions/${id}/action`, "POST", { action: "renew" }); toast("Subscription renewed"); loadDash(); });
 const allVariants = () => CAT.products.flatMap((p) => p.variants.map((v) => [v.id, `${p.name} – ${v.value} (+${v.extra_price})`]));
 const refreshCustomers = () => safe(async () => { CAT.customers = (await api("/api/customers")).items; });
 async function newSub() {
@@ -276,6 +283,24 @@ async function newSub() {
     [1, 2].forEach((i) => { if (v["p" + i]) lines.push({ product_id: Number(v["p" + i]), variant_id: v["v" + i] ? Number(v["v" + i]) : null, qty: v["q" + i] || 1 }); });
     await api("/api/subscriptions", "POST", { customer_id: Number(v.customer_id), plan_id: Number(v.plan_id), start_date: v.start_date, expiry_date: v.expiry_date || null, payment_terms: v.payment_terms, lines });
     toast("Subscription created (Draft)"); loadSubs();
+  });
+}
+function editSub(id) {
+  const s = (window.SUBS || []).find((x) => x.id === id);
+  if (!s) return;
+  const plan = CAT.plans.find((p) => p.name === s.plan);
+  openForm("Edit " + s.number, [
+    { name: "plan_id", label: "Plan", type: "select", options: CAT.plans.map((p) => [p.id, `${p.name} – ${money(p.price)}/${p.billing_period}`]), value: plan?.id },
+    { name: "start_date", label: "Start date", type: "date", value: s.start_date },
+    { name: "expiry_date", label: "Expiry date", type: "date", value: s.expiry_date },
+    { name: "payment_terms", label: "Payment terms", type: "select", options: [["", "Keep current"], ["Immediate", "Immediate"], ["Net 15", "Net 15"], ["Net 30", "Net 30"]], value: "" },
+  ], async (v) => {
+    const body = { plan_id: Number(v.plan_id) };
+    if (v.start_date) body.start_date = v.start_date;
+    if (v.expiry_date) body.expiry_date = v.expiry_date;
+    if (v.payment_terms) body.payment_terms = v.payment_terms;
+    await api(`/api/subscriptions/${id}`, "PUT", body);
+    toast("Subscription updated"); loadSubs();
   });
 }
 async function fromTemplate() {
@@ -319,7 +344,7 @@ async function openInvoice(id) {
       <div class="mt-4">${table([["Description", (r) => esc(r.description)], ["Qty", (r) => r.qty], ["Unit", (r) => money(r.unit_price)], ["Discount", (r) => r.discount ? "-" + money(r.discount) : "–"], ["Tax", (r) => r.tax_rate + "%"], ["Amount", (r) => money(r.amount)]], lines)}</div>
       <div class="text-right text-sm mt-3 space-y-1"><p>Subtotal ${money(i.subtotal)}</p><p class="text-emerald-400">Discounts -${money(i.discount_total)}</p><p>Tax ${money(i.tax_total)}</p>
         <p class="text-xl font-bold inv-total">Total ${money(i.total)}</p><p>Paid ${money(i.amount_paid)} · <b class="${i.balance > 0 ? "text-amber-300" : "text-emerald-400"}">Balance ${money(i.balance)}</b></p></div>
-      <h4 class="font-semibold mt-4 mb-1">Payments</h4>${table([["Date", (r) => r.pay_date], ["Method", (r) => esc(r.method)], ["Amount", (r) => money(r.amount)], ["Note", (r) => esc(r.note)]], payments)}
+      <h4 class="font-semibold mt-4 mb-1">Payments</h4>${table([["Date", (r) => r.pay_date], ["Method", (r) => esc(r.method)], ["Amount", (r) => money(r.amount)], ["Note", (r) => esc(r.note)]].concat(ME.role === "admin" ? [["", (r) => `<button class="btn-mini no-print" onclick="reversePay(${r.id},${id})">Reverse</button>`]] : []), payments)}
       <div class="flex flex-wrap justify-end gap-2 mt-5 no-print">
         ${staff && i.status === "draft" ? `<button class="btn" onclick="invAct(${id},'confirm')">Confirm</button>` : ""}
         ${staff && i.status === "confirmed" ? `<button class="btn" onclick="payForm(${id},${i.balance})">Record payment</button>` : ""}
@@ -337,6 +362,17 @@ function payForm(id, balance) {
     { name: "note", label: "Note", value: "Received against invoice" },
   ], async (v) => { await api(`/api/invoices/${id}/payments`, "POST", v); toast("Payment recorded"); setTimeout(() => { openInvoice(id); if (CUR === "inv") loadInv(); }, 60); });
 }
+function reversePay(pid, invId) {
+  if (!confirm("Reverse this payment? The invoice will be owed again.")) return;
+  safe(async () => {
+    await api(`/api/payments/${pid}/reverse`, "POST");
+    toast("Payment reversed");
+    if (invId) openInvoice(invId);
+    if (CUR === "pay") loadPay();
+    if (CUR === "inv") loadInv();
+    if (CUR === "dash") loadDash();
+  });
+}
 
 /* ================= payments ================= */
 function vPay() { $("#main").innerHTML = `<h2 class="text-xl font-semibold mb-4">Payments</h2><div id="list"></div>`; loadPay(); }
@@ -345,7 +381,7 @@ async function loadPay() {
     $("#list").innerHTML = loading();
     const d = await api("/api/payments?page=" + S.pay.page);
     $("#list").innerHTML = `<div class="card">${table([["Date", (r) => r.pay_date], ["Invoice", (r) => `<a class="text-violet-400 cursor-pointer" onclick="openInvoice(${r.invoice_id})">${esc(r.invoice)}</a>`],
-      ["Customer", (r) => esc(r.customer)], ["Method", (r) => esc(r.method)], ["Amount", (r) => money(r.amount)], ["Note", (r) => esc(r.note)]], d.items)}${pager(d, "pay", "loadPay")}</div>`;
+      ["Customer", (r) => esc(r.customer)], ["Method", (r) => esc(r.method)], ["Amount", (r) => money(r.amount)], ["Note", (r) => esc(r.note)]].concat(ME.role === "admin" ? [["", (r) => `<button class="btn-mini" onclick="reversePay(${r.id},0)">Reverse</button>`]] : []), d.items)}${pager(d, "pay", "loadPay")}</div>`;
   });
 }
 
