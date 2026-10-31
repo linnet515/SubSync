@@ -431,9 +431,24 @@ def dashboard():
         overdue=q(db, """SELECT i.id, i.number, u.name AS customer, i.due_date, i.total - i.amount_paid AS balance
                          FROM invoices i JOIN users u ON u.id=i.customer_id
                          WHERE i.status='confirmed' AND i.due_date<? ORDER BY i.due_date LIMIT 10""", (t,)))
-
+# =============== renewals ===============
+@bp.get("/api/renewals")
+@roles_required("admin", "staff")
+def renewals():
+    """Active subscriptions that expire soon (or already expired but still active), so renewals are not missed."""
+    days = max(1, min(365, request.args.get("days", 30, type=int)))
+    limit = (date.today() + timedelta(days=days)).isoformat()
+    items = q(get_db(), """SELECT s.id, s.number, u.name AS customer, p.name AS plan, s.expiry_date,
+                           CAST(julianday(s.expiry_date) - julianday(?) AS INTEGER) AS days_left,
+                           p.allow_renew, p.auto_close
+                           FROM subscriptions s JOIN users u ON u.id = s.customer_id
+                           JOIN plans p ON p.id = s.plan_id
+                           WHERE s.status = 'active' AND s.expiry_date <= ?
+                           ORDER BY s.expiry_date""", (today(), limit))
+    return jsonify(days=days, items=items)
 
 # =============== demo data (relative to today so the dashboard always looks alive) ===============
+
 def seed_demo():
     db = connect()
     try:
@@ -462,6 +477,8 @@ def seed_demo():
                 sub = q1(db, """SELECT s.*, p.billing_period FROM subscriptions s JOIN plans p ON p.id=s.plan_id
                                 WHERE s.id=?""", (sid,))
                 bill_due(db, sub, t.isoformat(), True)
+        db.execute("UPDATE subscriptions SET expiry_date=? WHERE number='SUB-00001'", ((t + timedelta(days=12)).isoformat(),))
+        db.execute("UPDATE subscriptions SET expiry_date=? WHERE number='SUB-00003'", ((t + timedelta(days=25)).isoformat(),))
         methods = ["Bank transfer", "Card", "UPI"]
         for k, inv in enumerate(q(db, "SELECT * FROM invoices WHERE status='confirmed' ORDER BY id")):
             if inv["issue_date"] < ago(35):  # old invoices are paid; newer ones stay outstanding / overdue
