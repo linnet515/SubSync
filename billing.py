@@ -1,11 +1,13 @@
 """billing.py - subscriptions, invoice engine (taxes + discounts), payments, dashboard."""
+import csv
+import io
 import json
 import re
 import secrets
 import sqlite3
 from datetime import date, timedelta
 
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, Response, jsonify, request, session
 
 from core import add_period, connect, get_db, paged, q, q1, roles_required, send_email
 
@@ -476,6 +478,60 @@ def reverse_payment(pid):
     db.execute("UPDATE invoices SET amount_paid=?, status='confirmed' WHERE id=?", (paid, inv["id"]))
     db.commit()
     return jsonify(ok=True, invoice_id=inv["id"], amount_paid=paid)
+# =============== CSV export (for the finance lead) ===============
+def csv_response(filename, header, data_rows):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(header)
+    for r in data_rows:  # text starting with = + - @ could run as a formula in Excel, so we neutralise it
+        w.writerow([("'" + c) if isinstance(c, str) and c and c[0] in "=+-@" else c for c in r])
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+
+@bp.get("/api/export/invoices.csv")
+@roles_required("admin", "staff")
+def export_invoices():
+    a, where, args = request.args, ["1=1"], []
+    if a.get("status"):
+        where.append("i.status=?")
+        args.append(a["status"])
+    if a.get("overdue") == "1":
+        where.append("i.status='confirmed' AND i.due_date < ?")
+        args.append(today())
+    if a.get("from"):
+        where.append("i.issue_date >= ?")
+        args.append(a["from"])
+    if a.get("to"):
+        where.append("i.issue_date <= ?")
+        args.append(a["to"])
+    data = q(get_db(), f"""SELECT i.number, u.name AS customer, s.number AS subscription, i.issue_date, i.due_date,
+                           i.status, i.subtotal, i.discount_total, i.tax_total, i.total, i.amount_paid,
+                           ROUND(i.total - i.amount_paid, 2) AS balance
+                           FROM invoices i JOIN users u ON u.id=i.customer_id
+                           JOIN subscriptions s ON s.id=i.subscription_id
+                           WHERE {' AND '.join(where)} ORDER BY i.id""", args)
+    return csv_response("invoices.csv",
+                        ["Invoice", "Customer", "Subscription", "Issued", "Due", "Status", "Subtotal",
+                         "Discount", "Tax", "Total", "Paid", "Balance"],
+                        [list(r.values()) for r in data])
+
+
+@bp.get("/api/export/payments.csv")
+@roles_required("admin", "staff")
+def export_payments():
+    a, where, args = request.args, ["1=1"], []
+    if a.get("from"):
+        where.append("p.pay_date >= ?")
+        args.append(a["from"])
+    if a.get("to"):
+        where.append("p.pay_date <= ?")
+        args.append(a["to"])
+    data = q(get_db(), f"""SELECT p.pay_date, i.number AS invoice, u.name AS customer, p.method, p.amount, p.note
+                           FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN users u ON u.id=i.customer_id
+                           WHERE {' AND '.join(where)} ORDER BY p.id""", args)
+    return csv_response("payments.csv", ["Date", "Invoice", "Customer", "Method", "Amount", "Note"],
+                        [list(r.values()) for r in data])
 # =============== finance dashboard ===============
 @bp.get("/api/dashboard")
 @roles_required("admin", "staff")
