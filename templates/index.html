@@ -201,8 +201,13 @@ async function loadDash() {
         <div class="card"><div class="flex justify-between mb-3"><h3 class="font-semibold">Overdue invoices</h3>
           <button class="btn-mini" onclick="S.inv.overdue='1';go('inv')">See all</button></div>
           ${table([["Invoice", (r) => `<a class="text-violet-400 cursor-pointer" onclick="openInvoice(${r.id})">${esc(r.number)}</a>`], ["Customer", (r) => esc(r.customer)], ["Due", (r) => r.due_date], ["Balance", (r) => money(r.balance)]], d.overdue)}</div></div>
-      <div class="card mt-4"><h3 class="font-semibold mb-2">Invoices by status</h3><div class="flex gap-4 flex-wrap">
-        ${Object.entries(d.invoice_status).map(([k, v]) => `<span>${badge(k)} <b>${v}</b></span>`).join("") || "–"}</div></div>`;
+            <div class="card mt-4"><h3 class="font-semibold mb-3">Invoices by status</h3>
+        ${Object.entries(d.invoice_status).map(([k, v]) => {
+          const total = Object.values(d.invoice_status).reduce((a, b) => a + b, 0) || 1;
+          return `<div class="flex items-center gap-3 text-sm mb-2"><span class="w-24">${badge(k)}</span>
+            <div class="flex-1 h-3 rounded bg-slate-800"><div class="h-3 rounded bg-violet-500" style="width:${Math.max(3, (v / total) * 100)}%"></div></div>
+            <b class="w-8 text-right">${v}</b></div>`;
+        }).join("") || "<p class='text-slate-500'>No invoices yet.</p>"}</div>`;
   });
 }
 
