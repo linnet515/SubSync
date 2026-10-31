@@ -462,7 +462,20 @@ def list_payments():
               WHERE {' AND '.join(where)}"""
     return jsonify(paged("SELECT p.*, i.number AS invoice, u.name AS customer", frm, args, "p.id DESC", request))
 
-
+@bp.post("/api/payments/<int:pid>/reverse")
+@roles_required("admin")
+def reverse_payment(pid):
+    """Admin only: remove a wrongly recorded payment and put the invoice back to Confirmed (still owed)."""
+    db = get_db()
+    p = q1(db, "SELECT * FROM payments WHERE id=?", (pid,))
+    if not p:
+        return jsonify(error="Payment not found"), 404
+    inv = q1(db, "SELECT * FROM invoices WHERE id=?", (p["invoice_id"],))
+    paid = r2(max(0, inv["amount_paid"] - p["amount"]))
+    db.execute("DELETE FROM payments WHERE id=?", (pid,))
+    db.execute("UPDATE invoices SET amount_paid=?, status='confirmed' WHERE id=?", (paid, inv["id"]))
+    db.commit()
+    return jsonify(ok=True, invoice_id=inv["id"], amount_paid=paid)
 # =============== finance dashboard ===============
 @bp.get("/api/dashboard")
 @roles_required("admin", "staff")
