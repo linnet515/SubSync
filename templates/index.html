@@ -118,7 +118,7 @@ function showAuth(mode, msg) {
     <div class="flex justify-between mt-4 text-sm">${link("signup", "Create account")}${link("forgot", "Forgot password?")}</div>`;
   if (mode === "signup") b.innerHTML = `<h2 class="text-xl font-semibold mb-4">Create your account</h2>
     <input id="a-name" class="input" value="Pixel Studio" placeholder="Business / your name">
-    <input id="a-email" class="input mt-3" value="hello@pixelstudio.com" placeholder="Email">
+    <input id="a-email" class="input mt-3" value="hello+${Math.floor(Math.random() * 90000 + 10000)}@pixelstudio.com" placeholder="Email">
     <input id="a-pass" type="password" class="input mt-3" value="Welcome@2026" placeholder="Password">
     <p class="text-xs text-slate-500 mt-1">More than 8 characters, with upper case, lower case and a special character.</p>
     <p id="a-err" class="text-rose-400 text-sm mt-2"></p>
