@@ -5,6 +5,7 @@ import os
 import re
 import smtplib
 import sqlite3
+
 from datetime import date, datetime, timedelta
 from email.message import EmailMessage
 from functools import wraps
@@ -98,6 +99,7 @@ CREATE INDEX IF NOT EXISTS ix_inv_due ON invoices(due_date);
 CREATE INDEX IF NOT EXISTS ix_invl_inv ON invoice_lines(invoice_id);
 CREATE INDEX IF NOT EXISTS ix_pay_inv ON payments(invoice_id);
 CREATE INDEX IF NOT EXISTS ix_pay_date ON payments(pay_date);
+
 """
 
 
@@ -157,8 +159,8 @@ def paged(select, frm, args, order, req):
 
 # ---------- auth helpers ----------
 def valid_password(p):
-    return bool(len(p) > 8 and re.search(r"[A-Z]", p) and re.search(r"[a-z]", p)
-                and re.search(r"[^A-Za-z0-9]", p))
+    return bool(isinstance(p, str) and len(p) > 8 and re.search(r"[A-Z]", p)
+                and re.search(r"[a-z]", p) and re.search(r"[^A-Za-z0-9]", p))
 
 
 def roles_required(*roles):
