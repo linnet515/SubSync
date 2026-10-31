@@ -1,8 +1,8 @@
 .card { background:#0f172a; border:1px solid #1e293b; border-radius:1rem; padding:1.25rem; }
 .input { width:100%; background:#1e293b; border:1px solid #334155; border-radius:.5rem; padding:.5rem .75rem; color:#f1f5f9; outline:none; }
 .input:focus { border-color:#a78bfa; }
-.btn { background:#7c3aed; color:#fff; padding:.5rem 1rem; border-radius:.5rem; font-weight:600; }
-.btn:hover { background:#6d28d9; }
+.btn { background:#7c3aed !important; color:#fff !important; padding:.5rem 1rem; border-radius:.5rem; font-weight:600; cursor:pointer; }
+.btn:hover { background:#6d28d9 !important; }
 .btn-alt { background:#1e293b; color:#c4b5fd; padding:.5rem 1rem; border-radius:.5rem; font-weight:600; border:1px solid #334155; }
 .btn-alt:hover { background:#334155; } .btn-alt:disabled { opacity:.4; cursor:not-allowed; }
 .btn-mini { background:#1e293b; color:#c4b5fd; padding:.15rem .6rem; border-radius:.4rem; font-size:.75rem; border:1px solid #334155; }
