@@ -115,6 +115,15 @@ def login_user(u):
     session.clear()
     session.update(uid=u["id"], role=u["role"], name=u["name"])
 
+@app.before_request
+def drop_deactivated_sessions():
+    """If a logged-in user was deactivated, log them out on their next request."""
+    uid = session.get("uid")
+    if uid and request.path.startswith("/api/"):
+        u = one("SELECT active FROM users WHERE id=?", (uid,))
+        if not u or not u["active"]:
+            session.clear()
+
 
 @app.route("/")
 def home():
@@ -148,6 +157,8 @@ def login():
     u = one("SELECT * FROM users WHERE email=?", ((d.get("email") or "").strip().lower(),))
     if not u or not check_password_hash(u["password_hash"], d.get("password") or ""):
         return jsonify(error="Wrong email or password"), 401
+    if not u["active"]:
+        return jsonify(error="This account has been deactivated. Please contact the admin."), 403
     login_user(u)
     return jsonify(user=user_json(u))
 
@@ -200,7 +211,28 @@ def reset():
 @app.get("/api/staff")
 @roles_required("admin")
 def staff_list():
-    return jsonify(items=rows("SELECT id,name,email,role,created FROM users WHERE role IN ('admin','staff') ORDER BY id"))
+    return jsonify(items=rows(
+        "SELECT id,name,email,role,created,active FROM users WHERE role IN ('admin','staff') ORDER BY id"))
+
+
+def set_staff_active(uid, value):
+    u = one("SELECT * FROM users WHERE id=?", (uid,))
+    if not u or u["role"] != "staff":
+        return jsonify(error="Staff member not found"), 404
+    run("UPDATE users SET active=? WHERE id=?", (value, uid))
+    return jsonify(ok=True, active=value)
+
+
+@app.post("/api/staff/<int:uid>/deactivate")
+@roles_required("admin")
+def staff_deactivate(uid):
+    return set_staff_active(uid, 0)
+
+
+@app.post("/api/staff/<int:uid>/activate")
+@roles_required("admin")
+def staff_activate(uid):
+    return set_staff_active(uid, 1)
 
 
 @app.post("/api/staff")

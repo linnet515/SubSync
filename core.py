@@ -225,6 +225,10 @@ def send_email(to, subject, body):
 def init_db():
     db = connect()
     db.executescript(SCHEMA)
+    # add the "active" column to databases created before this feature
+    user_cols = [r[1] for r in db.execute("PRAGMA table_info(users)").fetchall()]
+    if "active" not in user_cols:
+        db.execute("ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
     if db.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         t = date.today()
